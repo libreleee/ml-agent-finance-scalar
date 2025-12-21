@@ -1,0 +1,39 @@
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  model_name: "options-signal-model"
+  model_alias: "Production"
+
+clickhouse:
+  host: "localhost"
+  port: 8123
+  username: "default"
+  password: ""
+  database: "ops"
+
+baseline:
+  # baseline 프로파일은 Production 승격 시 MLflow artifact로 저장하는 것을 권장
+  days: 60
+  artifact_path: "baseline/profile.json"  # 예시
+
+current:
+  window_minutes: 60
+
+features:
+  key_features:
+    - iv_atm
+    - iv_skew
+    - bid_ask_spread
+    - volume_1m
+    - oi
+    - delta
+    - gamma
+    - vega
+    - theta
+
+thresholds:
+  psi_warning: 0.2
+  psi_critical: 0.3
+  critical_feature_ratio: 0.2
+
+outputs:
+  write_to_clickhouse: true

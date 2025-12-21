@@ -1,0 +1,17 @@
+flowchart LR
+  A[Raw Tick/XML
+(years)] --> B[Spark Ingestion/QA]
+  B --> C[(Iceberg Bronze
+raw_ticks/raw_codes)]
+  C --> D[Spark ETL]
+  D --> E[(Iceberg Silver
+ticks + dim_contract)]
+  E --> F[Spark Feature/Label Jobs]
+  F --> G[(Iceberg Gold
+bars/features/labels)]
+  G --> H[Ray: walk-forward/tune/backtest]
+  H --> I[(MLflow Tracking)]
+  I --> J[(MLflow Model Registry
+Staging/Production)]
+  J --> K[Promotion Report
+Lineage]

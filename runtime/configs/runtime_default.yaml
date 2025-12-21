@@ -1,0 +1,29 @@
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  model_name: "options-signal-model"
+  model_alias: "Production"
+
+runtime:
+  bar_interval_sec: 60
+  timezone: "Asia/Seoul"
+
+cache:
+  redis_url: "redis://localhost:6379/0"
+  window_minutes: 120
+
+clickhouse:
+  host: "localhost"
+  port: 8123
+  username: "default"
+  password: ""
+  database: "ops"
+  secure: false
+
+risk:
+  max_positions: 10
+  max_daily_loss: 0.02
+  max_trade_size: 1.0
+
+execution:
+  mode: "paper"
+  strategy_id: "default-strategy"

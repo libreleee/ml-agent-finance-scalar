@@ -1,0 +1,26 @@
+flowchart LR
+  subgraph Offline[Design-Time / Offline A]
+    A[Raw XML] --> B[Spark]
+    B --> C[(Iceberg Bronze)]
+    C --> D[Spark ETL]
+    D --> E[(Iceberg Silver)]
+    E --> F[(Iceberg Gold)]
+    F --> R[Ray Experiments]
+    R --> MF[(MLflow Registry)]
+  end
+
+  subgraph Runtime[Runtime Trading]
+    MD[Market Data] --> BB[Bar Builder]
+    BB --> FC[Feature Calc]
+    FC --> RD[(Redis)]
+    RD --> INF[Inference
+MLflow Production]
+    INF --> RG[Risk Gate]
+    RG --> EX[Execution]
+    EX --> CH[(ClickHouse ops)]
+  end
+
+  CH --> DJ[Drift Job]
+  DJ --> CH
+  DJ --> CT[CT Trigger]
+  CT --> R

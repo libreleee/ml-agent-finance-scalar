@@ -1,0 +1,28 @@
+flowchart LR
+  M[Market Data Feed] --> B1[Bar Builder
+(1m/5m)]
+  M --> OB[Orderbook Handler
+(optional)]
+  B1 --> FC[Feature Calculator
+(shared)]
+  OB --> FC
+
+  FC --> RC[(Redis Cache
+recent window)]
+  RC --> INF[Inference
+MLflow Production]
+  INF --> RG[Risk Gate]
+  RG --> EX[Execution Engine]
+  EX --> CH[(ClickHouse ops.*
+features/preds/execution/risk/pnl)]
+  CH --> DB[Dashboards/Alerts
+Grafana/Superset]
+
+  CH --> DJ[Drift Job
+15m~1h]
+  DJ --> CH
+  DJ --> CT[CT Trigger
+repository_dispatch]
+  CT --> OFF[Offline A Train]
+  OFF --> MR[(MLflow Registry)]
+  MR --> INF

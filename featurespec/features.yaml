@@ -1,0 +1,53 @@
+version: 1
+description: "Shared feature specification for offline and runtime parity."
+
+entities:
+  - name: contract
+    keys: ["ymcode", "cp", "code"]
+    description: "Option contract identity"
+
+features:
+  - name: iv_atm
+    dtype: float
+    window: "1m"
+    description: "ATM implied volatility"
+
+  - name: iv_skew
+    dtype: float
+    window: "1m"
+    description: "IV skew"
+
+  - name: bid_ask_spread
+    dtype: float
+    window: "1m"
+    description: "Best ask - best bid"
+
+  - name: volume_1m
+    dtype: float
+    window: "1m"
+    description: "Traded volume for 1m"
+
+  - name: oi
+    dtype: float
+    window: "1m"
+    description: "Open interest proxy at 1m"
+
+  - name: delta
+    dtype: float
+    window: "1m"
+    description: "Greek Delta"
+
+  - name: gamma
+    dtype: float
+    window: "1m"
+    description: "Greek Gamma"
+
+  - name: vega
+    dtype: float
+    window: "1m"
+    description: "Greek Vega"
+
+  - name: theta
+    dtype: float
+    window: "1m"
+    description: "Greek Theta"

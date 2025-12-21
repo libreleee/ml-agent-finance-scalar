@@ -1,0 +1,25 @@
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment: "options_offline_train"
+
+data:
+  # 실제 구현에서는 Iceberg Gold 테이블에서 로드(예: spark → parquet export)
+  # 이 스켈레톤은 "인터페이스 고정" 목적입니다.
+  features_table: "gold.features_1m"
+  labels_table: "gold.labels_1m"
+  train_window_days: 365
+  valid_window_days: 30
+
+model:
+  type: "lightgbm"
+  params:
+    learning_rate: 0.05
+    num_leaves: 63
+    n_estimators: 500
+    subsample: 0.8
+    colsample_bytree: 0.8
+
+promotion:
+  register_to_model_registry: true
+  model_name: "options-signal-model"
+  target_alias: "Staging"

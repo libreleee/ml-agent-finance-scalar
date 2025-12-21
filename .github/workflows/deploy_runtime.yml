@@ -1,0 +1,17 @@
+name: Deploy Runtime
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy placeholder
+        run: |
+          echo "TODO: docker build/push + deploy runtime agent (k8s/ecs/compose)"

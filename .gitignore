@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.idea/
+.vscode/
+monitoring/_reports/
+artifacts/
+mlruns/
