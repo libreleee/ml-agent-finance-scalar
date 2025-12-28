@@ -9,6 +9,9 @@ tmp/
 *.tmp
 *.bak
 
+# JAR files (large)
+hive-jars/
+
 # Python cache
 __pycache__/
 *.pyc
