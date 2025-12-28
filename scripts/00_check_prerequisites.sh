@@ -85,13 +85,18 @@ if check_command "python3" "Python"; then
     python_version=$(python3 --version)
     echo "  Version: ${python_version}"
     
-    # Extract major.minor version in a single call
-    read py_major py_minor py_version_num < <(python3 -c 'import sys; print(sys.version_info.major, sys.version_info.minor, f"{sys.version_info.major}.{sys.version_info.minor}")')
+    # Extract major.minor version - simpler approach for better compatibility
+    py_version_info=$(python3 -c 'import sys; print(sys.version_info.major, sys.version_info.minor)')
+    py_major=$(echo "$py_version_info" | cut -d' ' -f1)
+    py_minor=$(echo "$py_version_info" | cut -d' ' -f2)
+    py_version_num="${py_major}.${py_minor}"
     
-    if (( py_major >= 3 && py_minor >= 11 )); then
+    if [[ "$py_major" =~ ^[0-9]+$ ]] && [[ "$py_minor" =~ ^[0-9]+$ ]] && (( py_major >= 3 && py_minor >= 11 )); then
         echo -e "  ${GREEN}Version check: OK (3.11+ required)${NC}"
-    else
+    elif [[ "$py_major" =~ ^[0-9]+$ ]] && [[ "$py_minor" =~ ^[0-9]+$ ]]; then
         echo -e "  ${YELLOW}Warning: Python 3.11+ recommended (found ${py_version_num})${NC}"
+    else
+        echo -e "  ${YELLOW}Warning: Could not verify Python version${NC}"
     fi
 else
     echo "  Install from: https://www.python.org/downloads/"
@@ -109,19 +114,27 @@ if check_command "java" "Java"; then
     # Use sed for better portability (works on macOS and Linux)
     java_version_string=$(java -version 2>&1 | head -n 1 | sed -n 's/.*version "\([^"]*\)".*/\1/p')
     
-    # Extract major version number
-    if [[ "$java_version_string" =~ ^1\. ]]; then
-        # Old format: 1.8.0_292 -> extract 8
-        java_major=$(echo "$java_version_string" | cut -d. -f2)
+    # Check if version extraction was successful
+    if [[ -n "$java_version_string" ]]; then
+        # Extract major version number
+        if [[ "$java_version_string" =~ ^1\. ]]; then
+            # Old format: 1.8.0_292 -> extract 8
+            java_major=$(echo "$java_version_string" | cut -d. -f2)
+        else
+            # New format: 17.0.1 -> extract 17
+            java_major=$(echo "$java_version_string" | cut -d. -f1)
+        fi
+        
+        # Validate that we have a numeric major version before comparison
+        if [[ "${java_major}" =~ ^[0-9]+$ ]] && (( java_major >= 17 )); then
+            echo -e "  ${GREEN}Version check: OK (Java 17+ required for Spark)${NC}"
+        elif [[ "${java_major}" =~ ^[0-9]+$ ]]; then
+            echo -e "  ${YELLOW}Warning: Java 17+ recommended for Spark (found Java ${java_major})${NC}"
+        else
+            echo -e "  ${YELLOW}Warning: Could not parse Java version${NC}"
+        fi
     else
-        # New format: 17.0.1 -> extract 17
-        java_major=$(echo "$java_version_string" | cut -d. -f1)
-    fi
-    
-    if [[ "${java_major}" =~ ^[0-9]+$ ]] && (( java_major >= 17 )); then
-        echo -e "  ${GREEN}Version check: OK (Java 17+ required for Spark)${NC}"
-    else
-        echo -e "  ${YELLOW}Warning: Java 17+ recommended for Spark (found Java ${java_major})${NC}"
+        echo -e "  ${YELLOW}Warning: Could not extract Java version${NC}"
     fi
 else
     echo "  Required for Apache Spark"
