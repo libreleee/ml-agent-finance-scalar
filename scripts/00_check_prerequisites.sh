@@ -21,7 +21,6 @@ all_checks_passed=true
 check_command() {
     local cmd=$1
     local name=$2
-    local min_version=${3:-""}
     
     echo -n "Checking ${name}... "
     
@@ -86,10 +85,8 @@ if check_command "python3" "Python"; then
     python_version=$(python3 --version)
     echo "  Version: ${python_version}"
     
-    # Extract major.minor version
-    py_version_num=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    py_major=$(python3 -c 'import sys; print(sys.version_info.major)')
-    py_minor=$(python3 -c 'import sys; print(sys.version_info.minor)')
+    # Extract major.minor version in a single call
+    read py_major py_minor py_version_num < <(python3 -c 'import sys; print(sys.version_info.major, sys.version_info.minor, f"{sys.version_info.major}.{sys.version_info.minor}")')
     
     if (( py_major >= 3 && py_minor >= 11 )); then
         echo -e "  ${GREEN}Version check: OK (3.11+ required)${NC}"
@@ -109,7 +106,8 @@ if check_command "java" "Java"; then
     
     # Check if Java 17+ is available
     # Extract version: handles both old format (1.8.0) and new format (17.0.1)
-    java_version_string=$(java -version 2>&1 | head -n 1 | grep -oP '(?<=version ")[^"]+')
+    # Use sed for better portability (works on macOS and Linux)
+    java_version_string=$(java -version 2>&1 | head -n 1 | sed -n 's/.*version "\([^"]*\)".*/\1/p')
     
     # Extract major version number
     if [[ "$java_version_string" =~ ^1\. ]]; then
