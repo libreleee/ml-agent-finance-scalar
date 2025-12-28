@@ -91,10 +91,14 @@ if check_command "python3" "Python"; then
     py_minor=$(echo "$py_version_info" | cut -d' ' -f2)
     py_version_num="${py_major}.${py_minor}"
     
-    if [[ "$py_major" =~ ^[0-9]+$ ]] && [[ "$py_minor" =~ ^[0-9]+$ ]] && (( py_major >= 3 && py_minor >= 11 )); then
-        echo -e "  ${GREEN}Version check: OK (3.11+ required)${NC}"
-    elif [[ "$py_major" =~ ^[0-9]+$ ]] && [[ "$py_minor" =~ ^[0-9]+$ ]]; then
-        echo -e "  ${YELLOW}Warning: Python 3.11+ recommended (found ${py_version_num})${NC}"
+    # Validate version numbers are numeric
+    if [[ "$py_major" =~ ^[0-9]+$ ]] && [[ "$py_minor" =~ ^[0-9]+$ ]]; then
+        # python3 command guarantees major version is 3, so we only check minor version
+        if (( py_minor >= 11 )); then
+            echo -e "  ${GREEN}Version check: OK (3.11+ required)${NC}"
+        else
+            echo -e "  ${YELLOW}Warning: Python 3.11+ recommended (found ${py_version_num})${NC}"
+        fi
     else
         echo -e "  ${YELLOW}Warning: Could not verify Python version${NC}"
     fi
@@ -125,11 +129,13 @@ if check_command "java" "Java"; then
             java_major=$(echo "$java_version_string" | cut -d. -f1)
         fi
         
-        # Validate that we have a numeric major version before comparison
-        if [[ "${java_major}" =~ ^[0-9]+$ ]] && (( java_major >= 17 )); then
-            echo -e "  ${GREEN}Version check: OK (Java 17+ required for Spark)${NC}"
-        elif [[ "${java_major}" =~ ^[0-9]+$ ]]; then
-            echo -e "  ${YELLOW}Warning: Java 17+ recommended for Spark (found Java ${java_major})${NC}"
+        # Validate that we have a numeric major version, then compare once
+        if [[ "${java_major}" =~ ^[0-9]+$ ]]; then
+            if (( java_major >= 17 )); then
+                echo -e "  ${GREEN}Version check: OK (Java 17+ required for Spark)${NC}"
+            else
+                echo -e "  ${YELLOW}Warning: Java 17+ recommended for Spark (found Java ${java_major})${NC}"
+            fi
         else
             echo -e "  ${YELLOW}Warning: Could not parse Java version${NC}"
         fi
