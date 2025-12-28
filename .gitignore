@@ -1,0 +1,31 @@
+# Logs
+logs/
+
+# Warehouse data (large files)
+warehouse/
+
+# Temporary files
+tmp/
+*.tmp
+*.bak
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment files
+.env
+.env.local
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large data files
+data/*.xml
+*.jar
