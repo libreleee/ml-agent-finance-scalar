@@ -108,11 +108,22 @@ if check_command "java" "Java"; then
     echo "  Version: ${java_version}"
     
     # Check if Java 17+ is available
-    java_major=$(java -version 2>&1 | head -n 1 | sed -n 's/.*"\(.*\)".*/\1/p' | cut -d. -f1)
+    # Extract version: handles both old format (1.8.0) and new format (17.0.1)
+    java_version_string=$(java -version 2>&1 | head -n 1 | grep -oP '(?<=version ")[^"]+')
+    
+    # Extract major version number
+    if [[ "$java_version_string" =~ ^1\. ]]; then
+        # Old format: 1.8.0_292 -> extract 8
+        java_major=$(echo "$java_version_string" | cut -d. -f2)
+    else
+        # New format: 17.0.1 -> extract 17
+        java_major=$(echo "$java_version_string" | cut -d. -f1)
+    fi
+    
     if [[ "${java_major}" =~ ^[0-9]+$ ]] && (( java_major >= 17 )); then
         echo -e "  ${GREEN}Version check: OK (Java 17+ required for Spark)${NC}"
     else
-        echo -e "  ${YELLOW}Warning: Java 17+ recommended for Spark${NC}"
+        echo -e "  ${YELLOW}Warning: Java 17+ recommended for Spark (found Java ${java_major})${NC}"
     fi
 else
     echo "  Required for Apache Spark"
