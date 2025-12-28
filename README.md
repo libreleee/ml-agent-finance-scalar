@@ -69,6 +69,12 @@
 > 이 레포는 “로컬 실행 가능한 뼈대”를 제공합니다.  
 > Spark/Iceberg 실행은 환경(Windows/WSL/Linux)에 따라 세팅이 달라질 수 있으니 문서를 따라가세요.
 
+0) 필수 구성 요소 확인
+
+```bash
+bash scripts/00_check_prerequisites.sh
+```
+
 1) 서비스 올리기(MLflow + MinIO + Nessie + Redis)
 
 ```bash

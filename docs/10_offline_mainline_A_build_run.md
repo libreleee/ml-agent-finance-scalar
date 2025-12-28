@@ -17,6 +17,16 @@
 - Java 17 (Spark용)
 - (선택) WSL2 Ubuntu (Windows에서 권장)
 
+### 1.1 필수 구성 요소 확인
+
+시작하기 전에 필요한 도구가 모두 설치되어 있는지 확인하세요:
+
+```bash
+bash scripts/00_check_prerequisites.sh
+```
+
+이 스크립트는 Docker, Docker Compose, Python, Java의 설치 여부와 버전을 확인합니다.
+
 ---
 
 ## 2) docker compose (MinIO + Nessie + MLflow + Redis)
