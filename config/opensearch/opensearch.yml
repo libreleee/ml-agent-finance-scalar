@@ -1,0 +1,18 @@
+cluster.name: lakehouse-logs
+node.name: opensearch-node1
+discovery.type: single-node
+network.host: 0.0.0.0
+http.port: 9200
+plugins.security.disabled: false
+plugins.security.allow_default_init_securityindex: true
+plugins.security.allow_unsafe_democertificates: true
+plugins.security.authcz.admin_dn:
+  - CN=admin,OU=SSL,O=Test,L=Test,C=DE
+plugins.security.ssl.transport.pemcert_filepath: /usr/share/opensearch/config/certificates/node.pem
+plugins.security.ssl.transport.pemkey_filepath: /usr/share/opensearch/config/certificates/node-key.pem
+plugins.security.ssl.transport.pemtrustedcas_filepath: /usr/share/opensearch/config/certificates/root-ca.pem
+plugins.security.ssl.transport.enforce_hostname_verification: false
+plugins.security.ssl.http.enabled: true
+plugins.security.ssl.http.pemcert_filepath: /usr/share/opensearch/config/certificates/node.pem
+plugins.security.ssl.http.pemkey_filepath: /usr/share/opensearch/config/certificates/node-key.pem
+plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/opensearch/config/certificates/root-ca.pem

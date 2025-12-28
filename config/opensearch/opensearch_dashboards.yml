@@ -1,0 +1,9 @@
+server.host: "0.0.0.0"
+server.defaultRoute: "/app/home"
+opensearch.hosts: ["https://opensearch:9200"]
+opensearch.ssl.verificationMode: none
+opensearch.username: "admin"
+opensearch.password: "Admin@123"
+opensearch_security.enabled: true
+opensearch_security.cookie.secure: false
+opensearchDashboards.defaultAppId: "home"

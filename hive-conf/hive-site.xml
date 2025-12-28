@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<configuration>
+  <property>
+    <name>javax.jdo.option.ConnectionURL</name>
+    <value>jdbc:postgresql://hive-postgres:5432/metastore</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionDriverName</name>
+    <value>org.postgresql.Driver</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionUserName</name>
+    <value>hive</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionPassword</name>
+    <value>hive</value>
+  </property>
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>s3a://lakehouse/warehouse/</value>
+  </property>
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>http://seaweedfs-s3:8333</value>
+  </property>
+  <!-- NOTE: Using SeaweedFS S3 gateway for testing; keys are set in docker-compose.yml -->
+  <property>
+    <name>fs.s3a.access.key</name>
+    <value>seaweedfs_access_key</value>
+  </property>
+  <property>
+    <name>fs.s3a.secret.key</name>
+    <value>seaweedfs_secret_key</value>
+  </property>
+  <!-- Recommended: store these credentials in a secure secret store and inject into containers at runtime -->
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.s3a.connection.ssl.enabled</name>
+    <value>false</value>
+  </property>
+</configuration>

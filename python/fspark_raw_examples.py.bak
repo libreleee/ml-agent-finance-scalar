@@ -1,0 +1,132 @@
+from pyspark.sql import SparkSession
+from datetime import datetime
+from pyspark.sql import Row
+from pyspark.sql.functions import to_json, struct
+import os
+import json
+
+# AWS/SeaweedFS S3 인증 (테스트용)
+os.environ['AWS_ACCESS_KEY_ID'] = 'seaweedfs_access_key'
+os.environ['AWS_SECRET_ACCESS_KEY'] = 'seaweedfs_secret_key'
+os.environ['AWS_REGION'] = 'us-east-1'
+
+# Spark + Iceberg (기존과 동일한 카탈로그 사용)
+spark = SparkSession.builder \
+    .appName("IcebergRawExamples") \
+    .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
+    .config("spark.sql.catalog.hive_prod", "org.apache.iceberg.spark.SparkCatalog") \
+    .config("spark.sql.catalog.hive_prod.type", "hadoop") \
+    .config("spark.sql.catalog.hive_prod.warehouse", "s3a://lakehouse/warehouse") \
+    .config("spark.sql.catalog.hive_prod.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
+    .config("spark.sql.catalog.hive_prod.s3.endpoint", "http://localhost:8333") \
+    .config("spark.sql.catalog.hive_prod.s3.path-style-access", "true") \
+    .config("spark.jars.packages", \
+            "org.apache.iceberg:iceberg-spark-runtime-4.0_2.13:1.10.0,org.apache.hadoop:hadoop-aws:3.3.4,software.amazon.awssdk:bundle:2.25.23,software.amazon.awssdk:url-connection-client:2.25.23,com.amazonaws:aws-java-sdk-bundle:1.12.262") \
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
+    .config("spark.hadoop.fs.s3a.access.key", "seaweedfs_access_key") \
+    .config("spark.hadoop.fs.s3a.secret.key", "seaweedfs_secret_key") \
+    .config("spark.hadoop.fs.s3a.endpoint", "http://localhost:8333") \
+    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
+    .config("spark.hadoop.fs.s3a.multipart.copy.enabled", "false") \
+    .config("spark.hadoop.fs.s3a.change.detection.mode", "none") \
+    .config("spark.hadoop.fs.s3a.fast.upload", "true") \
+    .config("spark.hadoop.fs.s3a.connection.timeout", "60000") \
+    .config("spark.hadoop.fs.s3a.socket.timeout", "60000") \
+    .config("spark.hadoop.fs.s3a.connection.establish.timeout", "60000") \
+    .config("spark.hadoop.fs.s3a.threads.keepalivetime", "60000") \
+    .config("spark.hadoop.fs.s3a.multipart.purge.age", "86400") \
+    .getOrCreate()
+
+print("Spark 버전:", spark.version)
+
+# ---------------------------------------------------------------------------
+# 1) 반정형 예제: JSON 로그를 Raw(파일)로 저장하고, Iceberg 테이블(정형)로 적재
+# ---------------------------------------------------------------------------
+raw_json_path = "s3a://lakehouse/raw/logs/date={date}/".format(date=datetime.utcnow().strftime('%Y-%m-%d'))
+
+# 샘플 반정형 데이터
+sample_logs = [
+    {
+        "event_time": datetime(2025, 12, 24, 9, 0, 0).isoformat(),
+        "level": "INFO",
+        "message": "trade executed",
+        "meta": json.dumps({"user": "trader01", "order_id": "ord-1001"})
+    },
+
+]
+
+# DataFrame 생성 및 raw JSON 파일로 저장 (원본 보존)
+df_logs = spark.createDataFrame(sample_logs)
+df_logs.write.mode("append").json(raw_json_path)
+print("반정형 JSON(raw) 저장 완료 ->", raw_json_path)
+
+# Iceberg 테이블 (bronze layer)로 적재: meta 는 문자열로 보관 (schema-on-read로 파싱 가능)
+spark.sql("CREATE DATABASE IF NOT EXISTS hive_prod.logs_db")
+spark.sql("DROP TABLE IF EXISTS hive_prod.logs_db.raw_logs")
+spark.sql("""
+CREATE TABLE IF NOT EXISTS hive_prod.logs_db.raw_logs (
+    event_time TIMESTAMP,
+    level STRING,
+    message STRING,
+    meta STRING,
+    ingest_time TIMESTAMP
+)
+USING iceberg
+PARTITIONED BY (days(event_time))
+""")
+
+# meta 컬럼은 이미 JSON 문자열이므로 그대로 사용하고 timestamp와 ingest_time 컬럼 추가
+from pyspark.sql.functions import current_timestamp
+
+df_logs_for_table = df_logs.withColumn("event_time", df_logs.event_time.cast("timestamp")).withColumn("ingest_time", current_timestamp())
+df_logs_for_table.write.mode("append").insertInto("hive_prod.logs_db.raw_logs")
+print("반정형 데이터 -> Iceberg 테이블(hive_prod.logs_db.raw_logs)로 적재 완료")
+
+# ---------------------------------------------------------------------------
+# 2) 비정형 예제: 이미지(비트스트림)를 Raw 경로(S3)로 저장 (파일 단위 보관)
+# ---------------------------------------------------------------------------
+# 샘플 바이너리(예시용 텍스트를 바이너리로 저장)
+sample_bytes = b"This is a sample binary content representing an image or other file."
+image_s3_path = "s3a://lakehouse/raw/images/{date}/sample.txt".format(date=datetime.utcnow().strftime('%Y-%m-%d'))
+image_local_path = "./data/image1.png"
+
+# Hadoop FileSystem을 사용해 S3에 바이너리 파일을 직접 작성
+jconf = spark._jsc.hadoopConfiguration()
+fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(spark._jvm.java.net.URI(image_s3_path), jconf)
+path = spark._jvm.org.apache.hadoop.fs.Path(image_s3_path)
+
+try:
+    out = fs.create(path, True)
+    out.write(bytearray(sample_bytes))
+    out.close()
+    print("비정형(바이너리) 파일 저장 완료 ->", image_s3_path)
+except Exception as e:
+    print("비정형 저장 실패:", e)
+
+# 로컬 바이너리 파일을 읽어서 동일한 날짜 하위에 업로드
+if os.path.isfile(image_local_path):
+    local_target_path = "s3a://lakehouse/raw/images/{date}/image1.png".format(date=datetime.utcnow().strftime('%Y-%m-%d'))
+    local_path_obj = spark._jvm.org.apache.hadoop.fs.Path(local_target_path)
+    try:
+        out = fs.create(local_path_obj, True)
+        with open(image_local_path, 'rb') as src:
+            out.write(bytearray(src.read()))
+        out.close()
+        print("로컬 이미지 파일 업로드 완료 ->", local_target_path)
+    except Exception as e:
+        print("로컬 이미지 업로드 실패:", e)
+else:
+    print("로컬 이미지 파일이 없음 ->", image_local_path)
+
+# 확인(간단히 목록 확인)
+try:
+    files = fs.listStatus(spark._jvm.org.apache.hadoop.fs.Path("s3a://lakehouse/raw/"))
+    print("raw/ 경로에 있는 항목 수:", len(files))
+except Exception as e:
+    print("raw/ 경로 조회 실패:", e)
+
+print("예제 스크립트 완료")
+
+spark.stop()

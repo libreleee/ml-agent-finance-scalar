@@ -1,0 +1,365 @@
+# ============================================================================
+# MLOps Stack - Separate Compose File
+# ============================================================================
+#
+# 이 파일은 기존 docker-compose.yml과 독립적으로 실행됩니다.
+#
+# 실행 방법:
+#   docker compose -f docker-compose-mlops.yml up -d
+#
+# 중지 방법:
+#   docker compose -f docker-compose-mlops.yml down
+#
+# 기존 Lakehouse 인프라와 통신하기 위해 external network 사용
+# ============================================================================
+
+
+services:
+  # ============================================================================
+  # MLflow - Experiment Tracking & Model Registry
+  # ============================================================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    container_name: mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      # S3 Backend (SeaweedFS)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-seaweedfs_access_key}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-seaweedfs_secret_key}
+      MLFLOW_S3_ENDPOINT_URL: http://seaweedfs-s3:8333
+      AWS_ENDPOINT_URL: http://seaweedfs-s3:8333
+      AWS_REGION: us-east-1
+
+      # MLflow 설정
+      MLFLOW_BACKEND_STORE_URI: sqlite:///mlflow/mlflow.db
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: s3://lakehouse/mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+      --default-artifact-root s3://lakehouse/mlflow
+    volumes:
+      - mlflow-data:/mlflow
+      - ./logs/mlflow:/mlflow/logs
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ============================================================================
+  # Airflow PostgreSQL - Airflow 메타스토어
+  # ============================================================================
+  airflow-postgres:
+    image: postgres:15-alpine
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB:-airflow}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - airflow-postgres-data:/var/lib/postgresql/data
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow", "-d", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ============================================================================
+  # Airflow Redis - Celery 브로커
+  # ============================================================================
+  airflow-redis:
+    image: redis:7-alpine
+    container_name: airflow-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - airflow-redis-data:/data
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ============================================================================
+  # Airflow Webserver - UI & API
+  # ============================================================================
+  airflow-webserver:
+    image: apache/airflow:2.8.0-python3.11
+    container_name: airflow-webserver
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-redis:
+        condition: service_healthy
+    ports:
+      - "8082:8080"
+    environment:
+      # Core
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
+
+      # Database
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+
+      # Celery
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://airflow-redis:6379/0
+
+      # Webserver
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY:-airflow-secret-key}
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+
+      # 추가 Python 패키지 자동 설치
+      _PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy
+
+      # Logging
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+
+      # Scheduler
+      AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+
+      # S3 연동 (SeaweedFS)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-seaweedfs_access_key}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-seaweedfs_secret_key}
+      AWS_ENDPOINT_URL_S3: http://seaweedfs-s3:8333
+      AWS_ENDPOINT_URL: http://seaweedfs-s3:8333
+      MLFLOW_S3_ENDPOINT_URL: http://seaweedfs-s3:8333
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+
+      # Hive Metastore
+      HIVE_METASTORE_URI: thrift://hive-metastore:9083
+
+      # MLflow 연동
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+
+      # OpenSearch 연동
+      OPENSEARCH_URL: https://opensearch-node1:9200
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs/airflow:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+    networks:
+      - lakehouse-net
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # ============================================================================
+  # Airflow Scheduler - DAG 스케줄링
+  # ============================================================================
+  airflow-scheduler:
+    image: apache/airflow:2.8.0-python3.11
+    container_name: airflow-scheduler
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-redis:
+        condition: service_healthy
+    environment:
+      # Core
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
+
+      # Database
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+
+      # Celery
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://airflow-redis:6379/0
+
+      # 추가 Python 패키지 자동 설치
+      _PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy
+
+      # Logging
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+
+      # Scheduler
+      AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+      AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
+
+      # S3 연동 (SeaweedFS)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-seaweedfs_access_key}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-seaweedfs_secret_key}
+      AWS_ENDPOINT_URL_S3: http://seaweedfs-s3:8333
+      AWS_ENDPOINT_URL: http://seaweedfs-s3:8333
+      MLFLOW_S3_ENDPOINT_URL: http://seaweedfs-s3:8333
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+
+      # Hive Metastore
+      HIVE_METASTORE_URI: thrift://hive-metastore:9083
+
+      # MLflow 연동
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+
+      # OpenSearch 연동
+      OPENSEARCH_URL: https://opensearch-node1:9200
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs/airflow:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+    networks:
+      - lakehouse-net
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$$(hostname)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # ============================================================================
+  # Airflow Worker - Celery 작업 실행
+  # ============================================================================
+  airflow-worker:
+    image: apache/airflow:2.8.0-python3.11
+    container_name: airflow-worker
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-redis:
+        condition: service_healthy
+    environment:
+      # Core
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-46BKJoQYlPPOexq0OhDZnIlNepKFf87WFwLbfzqDDho=}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
+
+      # Database
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+
+      # Celery
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://airflow-redis:6379/0
+
+      # 추가 Python 패키지 자동 설치
+      _PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy
+
+      # Logging
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+
+      # S3 연동 (SeaweedFS)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-seaweedfs_access_key}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-seaweedfs_secret_key}
+      AWS_ENDPOINT_URL_S3: http://seaweedfs-s3:8333
+      AWS_ENDPOINT_URL: http://seaweedfs-s3:8333
+      MLFLOW_S3_ENDPOINT_URL: http://seaweedfs-s3:8333
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+
+      # Hive Metastore
+      HIVE_METASTORE_URI: thrift://hive-metastore:9083
+
+      # MLflow 연동
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+
+      # OpenSearch 연동
+      OPENSEARCH_URL: https://opensearch-node1:9200
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs/airflow:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+    networks:
+      - lakehouse-net
+    command: celery worker
+    healthcheck:
+      test: ["CMD-SHELL", "celery --app airflow.executors.celery_executor.app inspect ping -d \"celery@$$(hostname)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+# ============================================================================
+# Networks - External Network 사용
+# ============================================================================
+networks:
+  lakehouse-net:
+    external: true
+
+# ============================================================================
+# Volumes - MLOps 전용 볼륨
+# ============================================================================
+volumes:
+  mlflow-data:
+    driver: local
+  airflow-postgres-data:
+    driver: local
+  airflow-redis-data:
+    driver: local

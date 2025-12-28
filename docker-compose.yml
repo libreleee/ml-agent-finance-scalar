@@ -1,0 +1,223 @@
+services:
+  # MinIO removed in favor of Ceph RGW. Backup of original file: docker-compose.yml.bak
+  # NOTE: Deploying a full Ceph cluster via a single docker-compose is non-trivial for production.
+  # This `ceph-rgw` service is a **placeholder/demo** to represent the RGW endpoint.
+  # For production, use an external Ceph RGW cluster (cephadm / rook-ceph) and point services to the RGW endpoint.
+  # ceph-rgw:
+  #   image: ceph/daemon:latest
+  #   container_name: ceph-rgw
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     RGW_NAME: rgw
+  #     # NOTE: RGW must be provisioned/configured before generating access keys.
+  #     # Keys are created AFTER the RGW is running (radosgw-admin or Dashboard). Do NOT hardcode secrets here.
+  #   volumes:
+  #     - ./ceph-data:/var/lib/ceph
+  #   healthcheck:
+  #     test: ["CMD", "bash", "-lc", "echo 'RGW placeholder - ensure real Ceph cluster is configured' && exit 0"]
+  #     interval: 30s
+  #     timeout: 20s
+  #     retries: 3
+  #   # Override entrypoint to prevent Ceph daemon startup; this is a placeholder for local testing.
+  #   entrypoint: ["sleep", "infinity"]
+
+  # Lightweight S3-compatible store for quick local testing (SeaweedFS)
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:4.02
+    container_name: seaweedfs-master
+    ports:
+      - "9333:9333"
+    command: ["master", "-ip.bind=0.0.0.0", "-ip=seaweedfs-master", "-peers=none", "-mdir=/data/master", "-defaultReplication=000"]
+    volumes:
+      - seaweedfs-data:/data
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9333"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:4.02
+    container_name: seaweedfs-volume
+    ports:
+      - "8081:8081"
+    command: ["volume", "-mserver=seaweedfs-master:9333", "-ip.bind=0.0.0.0", "-ip=seaweedfs-volume", "-port=8081", "-dir=/data"]
+    volumes:
+      - seaweedfs-data:/data
+    networks:
+      - lakehouse-net
+    depends_on:
+      seaweedfs-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:4.02
+    container_name: seaweedfs-filer
+    ports:
+      - "8889:8888"
+    command: ["filer", "-master=seaweedfs-master:9333", "-ip.bind=0.0.0.0", "-ip=seaweedfs-filer", "-defaultStoreDir=/data/filer", "-defaultReplicaPlacement=000"]
+    volumes:
+      - seaweedfs-data:/data
+    networks:
+      - lakehouse-net
+    depends_on:
+      seaweedfs-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:4.02
+    container_name: seaweedfs-s3
+    ports:
+      - "8333:8333"
+    command: ["s3", "-filer=seaweedfs-filer:8888", "-ip.bind=0.0.0.0"]
+    environment:
+      # BUGFIX: Use AWS_* prefix for standard S3 authentication compatibility
+      AWS_ACCESS_KEY_ID: seaweedfs_access_key
+      AWS_SECRET_ACCESS_KEY: seaweedfs_secret_key
+    networks:
+      - lakehouse-net
+    depends_on:
+      seaweedfs-master:
+        condition: service_healthy
+      seaweedfs-volume:
+        condition: service_healthy
+      seaweedfs-filer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional lightweight S3-compatible store for quick local testing (Garage)
+  # garage:
+  #   image: ghcr.io/khairul169/garage:latest
+  #   container_name: garage
+  #   ports:
+  #     - "9000:9000"
+  #   volumes:
+  #     - ./garage-data:/data
+  #   environment:
+  #     - GARAGE_CONFIG=default
+  #   healthcheck:
+  #     test: ["CMD", "bash", "-lc", "curl -f http://localhost:9000 || exit 1"]
+  #     interval: 30s
+  #     timeout: 20s
+  #     retries: 3
+
+  postgres:
+    image: postgres:15
+    container_name: hive-postgres
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "hive", "-d", "metastore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hive-metastore:
+    image: apache/hive:4.0.0
+    container_name: hive-metastore
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs-s3:
+        condition: service_healthy
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./hive-conf:/opt/hive/conf
+      - ./hive-jars/postgresql-42.5.4.jar:/opt/hive/lib/postgresql.jar
+      - ./hive-jars/hadoop-aws-3.3.4.jar:/opt/hive/lib/hadoop-aws.jar
+      - ./hive-jars/aws-java-sdk-bundle-1.12.540.jar:/opt/hive/lib/aws-java-sdk-bundle.jar
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      HADOOP_CLASSPATH: /opt/hive/lib/hadoop-aws.jar:/opt/hive/lib/aws-java-sdk-bundle.jar
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD","bash","-lc","timeout 1 bash -c 'echo > /dev/tcp/127.0.0.1/9083' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+    command: /opt/hive/bin/hive --service metastore
+
+  spark-iceberg:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-iceberg
+    hostname: spark-iceberg
+    depends_on:
+      seaweedfs-s3:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_healthy
+    ports:
+      - "8888:8888"   # Jupyter Lab
+      - "4040:4040"   # Spark UI
+    environment:
+      # IMPORTANT: Set real keys via .env or Docker Secrets AFTER RGW user/key creation.
+      # Example (do NOT commit):
+      # AWS_ACCESS_KEY_ID: your_access_key_here
+      # AWS_SECRET_ACCESS_KEY: your_secret_here
+      AWS_ENDPOINT_URL_S3: http://seaweedfs-s3:8333
+    volumes:
+      - ./data:/home/iceberg/data
+      - ./warehouse:/home/iceberg/warehouse
+      - ./notebooks:/home/iceberg/notebooks
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    command:
+      - "bash -lc \"jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password='' --NotebookApp.allow_origin='*' --NotebookApp.notebook_dir='/home/iceberg'\""
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: trino
+    depends_on:
+      - seaweedfs-s3
+      - hive-metastore
+    ports:
+      - "8080:8080"
+    environment:
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: seaweedfs_access_key
+      AWS_SECRET_ACCESS_KEY: seaweedfs_secret_key
+    volumes:
+      - ./trino-config:/etc/trino
+    networks:
+      - lakehouse-net
+
+volumes:
+  warehouse:
+  postgres-data:
+  seaweedfs-data:
+
+networks:
+  lakehouse-net:
+    external: true

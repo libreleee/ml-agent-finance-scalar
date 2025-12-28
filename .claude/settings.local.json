@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(xargs:*)",
+      "Bash(docker-compose:*)",
+      "Bash(docker --version:*)",
+      "Bash(docker compose config:*)",
+      "Bash(grep:*)",
+      "Bash(cat:*)",
+      "Bash(sudo chown:*)",
+      "Bash(docker network:*)",
+      "Bash(docker compose:*)",
+      "Bash(chmod:*)",
+      "Bash(docker exec:*)",
+      "Bash(curl:*)",
+      "Bash(docker logs:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(docker ps:*)",
+      "Bash(systemctl list-unit-files:*)",
+      "Bash(docker inspect:*)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(du:*)"
+    ]
+  }
+}

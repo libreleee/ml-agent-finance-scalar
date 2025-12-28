@@ -1,0 +1,274 @@
+# ============================================================================
+# Visual Stack - Separate Compose File
+# ============================================================================
+#
+# 이 파일은 기존 docker-compose.yml과 독립적으로 실행됩니다.
+#
+# 실행 방법:
+#   docker compose -f docker-compose-visual.yml up -d
+#
+# 중지 방법:
+#   docker compose -f docker-compose-visual.yml down
+#
+# 기존 Lakehouse 인프라와 통신하기 위해 external network 사용
+# ============================================================================
+
+
+services:
+  # ============================================================================
+  # Superset - BI Dashboard
+  # ============================================================================
+  superset-db:
+    image: postgres:15
+    container_name: superset-db
+    environment:
+      POSTGRES_DB: superset
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+    ports:
+      - "5432:5432"
+    volumes:
+      - superset-db-data:/var/lib/postgresql/data
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "superset", "-d", "superset"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: "no"
+
+  superset-redis:
+    image: redis:7-alpine
+    container_name: superset-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - superset-redis-data:/data
+    networks:
+      - lakehouse-net
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: "no"
+
+  superset:
+    image: apache/superset:latest-dev
+    container_name: superset
+    depends_on:
+      superset-db:
+        condition: service_healthy
+      superset-redis:
+        condition: service_started
+    ports:
+      - "8088:8088"
+    env_file:
+      - .env
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-your-super-secret-key}
+      SQLALCHEMY_DATABASE_URI: postgresql://superset:superset@superset-db:5432/superset
+      REDIS_HOST: superset-redis
+      REDIS_PORT: 6379
+      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-admin}
+    volumes:
+      - superset-data:/app/superset_home
+      - ./config/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./logs/superset:/app/logs
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    command: >
+      bash -c "
+      pip install --no-cache-dir \"trino[sqlalchemy]\" &&
+      superset db upgrade &&
+      superset fab create-admin --username $${SUPERSET_ADMIN_USER} --firstname Admin --lastname User --email admin@example.com --password $${SUPERSET_ADMIN_PASSWORD} || true &&
+      superset init &&
+      gunicorn -w 4 -b 0.0.0.0:8088 --timeout 60 \"superset.app:create_app()\"
+      "
+    restart: "no"
+
+  # ============================================================================
+  # OpenSearch - Log Analytics
+  # ============================================================================
+  opensearch:
+    image: opensearchproject/opensearch:2.11.1
+    container_name: opensearch
+    environment:
+      - cluster.name=lakehouse-logs
+      - node.name=opensearch-node1
+      - discovery.type=single-node
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD:-Admin@123}
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+      - ./config/opensearch/opensearch.yml:/usr/share/opensearch/config/opensearch.yml:ro
+      - ./config/opensearch/certificates:/usr/share/opensearch/config/certificates:ro
+      - ./config/opensearch/security:/usr/share/opensearch/config/opensearch-security:ro
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "curl", "-kfu", "admin:${OPENSEARCH_PASSWORD:-Admin@123}", "https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: "no"
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.11.1
+    container_name: opensearch-dashboards
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    ports:
+      - "5601:5601"
+    environment:
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:-Admin@123}
+    volumes:
+      - ./config/opensearch/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml:ro
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-u", "admin:${OPENSEARCH_PASSWORD:-Admin@123}", "http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: "no"
+
+  # ============================================================================
+  # Monitoring - Prometheus & Grafana
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:v2.49.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: "no"
+
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: "no"
+
+  grafana:
+    image: grafana/grafana:10.3.0
+    container_name: grafana
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-opensearch-datasource,grafana-clock-panel
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./logs/grafana:/var/log/grafana
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: "no"
+
+  # ============================================================================
+  # Streamlit - Unstructured Data App
+  # ============================================================================
+  streamlit:
+    image: python:3.11-slim
+    container_name: streamlit-app
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    working_dir: /app
+    ports:
+      - "8501:8501"
+    environment:
+      AWS_ACCESS_KEY_ID: seaweedfs_access_key
+      AWS_SECRET_ACCESS_KEY: seaweedfs_secret_key
+      AWS_ENDPOINT_URL_S3: http://seaweedfs-s3:8333
+      AWS_REGION: us-east-1
+      HIVE_METASTORE_URI: thrift://hive-metastore:9083
+      STREAMLIT_SERVER_PORT: 8501
+      STREAMLIT_SERVER_HEADLESS: "true"
+    volumes:
+      - ./streamlit-app:/app
+      - ./logs/streamlit:/app/logs
+    command: >
+      bash -c "
+      pip install --no-cache-dir -r requirements.txt &&
+      streamlit run app.py --server.port=8501 --server.headless=true --server.address=0.0.0.0
+      "
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - lakehouse-net
+    restart: "no"
+
+networks:
+  lakehouse-net:
+    external: true
+
+volumes:
+  superset-data:
+  superset-db-data:
+  superset-redis-data:
+  grafana-data:
+  opensearch-data:
+  prometheus-data:
