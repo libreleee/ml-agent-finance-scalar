@@ -22,11 +22,14 @@
 ## 2) 구성 요약
 
 ### DAG
-- DAG 파일(신규): `dags/ml_mnist_cnn_pytorch_native_dag.py`
-- DAG ID(신규): `mnist_cnn_training_pytorch_native`
+- DAG 파일(신규): `dags/ml_mnist_cnn_train_with_pytorch_dag.py`
+- DAG ID(신규): `mnist_cnn_training_train_with_pytorch`
+- 학습 스크립트: `dags/scripts/train_mnist_cnn_pytorch.py` (train 전용)
+- 평가 스크립트: `dags/scripts/evaluate_mnist_cnn_pytorch.py` (evaluate 전용)
 - Task 구성
-  - `train_mnist_torch_native`: `PythonOperator`로 PyTorch 학습을 직접 실행(CPU 스모크 테스트)
-  - `log_to_mlflow`: MLflow에 메트릭 기록
+  - `train_mnist_pytorch_script`: `BashOperator`로 학습 스크립트를 실행(모델 파일 저장)
+  - `evaluate_mnist_pytorch_script`: `BashOperator`로 평가 스크립트를 실행(메트릭/이미지 기록)
+  - MLflow 로깅은 학습/평가 스크립트가 직접 수행
 
 ---
 
@@ -39,7 +42,7 @@
 `docker-compose-mlops.yml`의 webserver/scheduler/worker에 예시:
 
 ```yaml
-_PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy torch==2.1.0 torchvision==0.16.0
+_PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy matplotlib==3.8.2 torch==2.1.0 torchvision==0.16.0
 ```
 
 > 주의: PyTorch는 플랫폼/파이썬 버전에 따라 wheel 크기가 크고 설치 시간이 길 수 있습니다.
@@ -54,21 +57,21 @@ _PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy torch==2.1.0 torch
 ### 4.1 DAG 로드 확인
 ```bash
 docker exec airflow-scheduler bash -lc \
-  "airflow dags list --output json | grep -F '\"dag_id\": \"mnist_cnn_training_pytorch_native\"' || true"
+  "airflow dags list --output json | grep -F '\"dag_id\": \"mnist_cnn_training_train_with_pytorch\"' || true"
 ```
 
 ### 4.2 DAG 활성화 및 트리거
 ```bash
-docker exec airflow-scheduler bash -lc "airflow dags unpause mnist_cnn_training_pytorch_native"
+docker exec airflow-scheduler bash -lc "airflow dags unpause mnist_cnn_training_train_with_pytorch"
 
 RUN_ID="manual__$(date -u +%Y%m%dT%H%M%S)"
-docker exec airflow-scheduler bash -lc "airflow dags trigger mnist_cnn_training_pytorch_native --run-id ${RUN_ID}"
+docker exec airflow-scheduler bash -lc "airflow dags trigger mnist_cnn_training_train_with_pytorch --run-id ${RUN_ID}"
 ```
 
 ### 4.3 상태 확인
 ```bash
-docker exec airflow-scheduler bash -lc "airflow dags list-runs -d mnist_cnn_training_pytorch_native --output json"
-docker exec airflow-scheduler bash -lc "airflow tasks states-for-dag-run mnist_cnn_training_pytorch_native ${RUN_ID}"
+docker exec airflow-scheduler bash -lc "airflow dags list-runs -d mnist_cnn_training_train_with_pytorch --output json"
+docker exec airflow-scheduler bash -lc "airflow tasks states-for-dag-run mnist_cnn_training_train_with_pytorch ${RUN_ID}"
 ```
 
 ---
@@ -87,7 +90,10 @@ docker exec airflow-scheduler bash -lc "airflow tasks states-for-dag-run mnist_c
 - Airflow worker에 torch/torchvision이 설치되지 않은 상태입니다.
 - `_PIP_ADDITIONAL_REQUIREMENTS` 또는 커스텀 이미지로 해결하세요.
 
+### `ModuleNotFoundError: No module named 'mlflow'` 또는 `matplotlib`
+- 학습/평가 스크립트가 MLflow에 직접 로깅하므로, 해당 패키지가 필요합니다.
+- `_PIP_ADDITIONAL_REQUIREMENTS` 또는 커스텀 이미지로 해결하세요.
+
 ### MNIST 데이터 다운로드 경로 문제
 - PyTorch 예제는 `torchvision.datasets.MNIST`를 사용하며 기본적으로 데이터를 다운로드합니다.
 - 컨테이너에서 쓸 수 있는 경로(예: `/tmp/mnist-data`)를 사용하도록 DAG 코드에서 지정합니다.
-

@@ -17,6 +17,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Airflow example artifacts (models, etc.)
+dags/artifacts/
+
 # Environment files
 .env
 .env.local

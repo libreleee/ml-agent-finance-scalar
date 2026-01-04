@@ -35,11 +35,11 @@ services:
       MLFLOW_BACKEND_STORE_URI: sqlite:///mlflow/mlflow.db
       MLFLOW_DEFAULT_ARTIFACT_ROOT: s3://lakehouse/mlflow
     command: >
-      mlflow server
+      bash -lc "pip install --no-cache-dir boto3==1.34.0 && mlflow server
       --host 0.0.0.0
       --port 5000
       --backend-store-uri sqlite:///mlflow/mlflow.db
-      --default-artifact-root s3://lakehouse/mlflow
+      --default-artifact-root s3://lakehouse/mlflow"
     volumes:
       - mlflow-data:/mlflow
       - ./logs/mlflow:/mlflow/logs
@@ -147,7 +147,8 @@ services:
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
 
       # 추가 Python 패키지 자동 설치
-      _PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy
+      PIP_DEFAULT_TIMEOUT: "300"
+      _PIP_ADDITIONAL_REQUIREMENTS: mlflow==2.9.2 boto3==1.34.0 scikit-learn==1.3.2 numpy==1.26.2 tensorflow==2.15.0
 
       # Logging
       AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
@@ -174,7 +175,7 @@ services:
       # OpenSearch 연동
       OPENSEARCH_URL: https://opensearch-node1:9200
     volumes:
-      - ./dags:/opt/airflow/dags
+      - airflow-dags:/opt/airflow/dags
       - ./logs/airflow:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
     networks:
@@ -223,7 +224,8 @@ services:
       AIRFLOW__CELERY__BROKER_URL: redis://airflow-redis:6379/0
 
       # 추가 Python 패키지 자동 설치
-      _PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy
+      PIP_DEFAULT_TIMEOUT: "300"
+      _PIP_ADDITIONAL_REQUIREMENTS: mlflow==2.9.2 boto3==1.34.0 scikit-learn==1.3.2 numpy==1.26.2 tensorflow==2.15.0
 
       # Logging
       AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
@@ -251,7 +253,7 @@ services:
       # OpenSearch 연동
       OPENSEARCH_URL: https://opensearch-node1:9200
     volumes:
-      - ./dags:/opt/airflow/dags
+      - airflow-dags:/opt/airflow/dags
       - ./logs/airflow:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
     networks:
@@ -304,7 +306,8 @@ services:
       AIRFLOW__CELERY__BROKER_URL: redis://airflow-redis:6379/0
 
       # 추가 Python 패키지 자동 설치
-      _PIP_ADDITIONAL_REQUIREMENTS: mlflow boto3 scikit-learn numpy
+      PIP_DEFAULT_TIMEOUT: "300"
+      _PIP_ADDITIONAL_REQUIREMENTS: mlflow==2.9.2 boto3==1.34.0 scikit-learn==1.3.2 numpy==1.26.2 tensorflow==2.15.0
 
       # Logging
       AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
@@ -328,7 +331,7 @@ services:
       # OpenSearch 연동
       OPENSEARCH_URL: https://opensearch-node1:9200
     volumes:
-      - ./dags:/opt/airflow/dags
+      - airflow-dags:/opt/airflow/dags
       - ./logs/airflow:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
       - /var/run/docker.sock:/var/run/docker.sock
@@ -364,6 +367,13 @@ networks:
 volumes:
   mlflow-data:
     driver: local
+  airflow-dags:
+    name: airflow-dags
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./dags
   airflow-postgres-data:
     driver: local
   airflow-redis-data:

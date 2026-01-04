@@ -13,9 +13,12 @@
 ### DAG
 - DAG 파일: `dags/ml_mnist_cnn_dag.py`
 - DAG ID: `mnist_cnn_training`
+- 학습 스크립트: `dags/scripts/train_mnist_cnn_tf.py` (train 전용)
+- 평가 스크립트: `dags/scripts/evaluate_mnist_cnn_tf.py` (evaluate 전용)
 - Task 구성
-  - `train_mnist_tf`: `DockerOperator`로 `tensorflow/tensorflow:2.15.0` 컨테이너에서 MNIST를 CPU로 짧게 학습(스모크 테스트)
-  - `log_to_mlflow`: `PythonOperator`로 결과(JSON)를 파싱해 MLflow에 메트릭 기록
+  - `train_mnist_tf`: `DockerOperator`로 학습 스크립트 실행(모델 파일 저장)
+  - `evaluate_mnist_tf`: `DockerOperator`로 평가 스크립트 실행(메트릭/이미지 기록)
+  - MLflow 로깅은 학습/평가 스크립트가 직접 수행
 
 ### 왜 DockerOperator인가? (final_solution 정렬)
 - Airflow는 “오케스트레이션”만 담당하고, 무거운 DL 런타임(TF/PyTorch)은 **전용 학습 컨테이너**가 담당합니다.
@@ -73,10 +76,16 @@ docker pull tensorflow/tensorflow:2.15.0
 
 `docker-compose-mlops.yml`에서 다음처럼 **호스트 폴더를 컨테이너에 마운트**합니다.
 
-- `./dags:/opt/airflow/dags`
+- `airflow-dags:/opt/airflow/dags` (bind 기반 named volume)
 
 즉, 로컬에서 `dags/ml_mnist_cnn_dag.py`를 수정/저장하면 컨테이너의 `/opt/airflow/dags`에도 즉시 반영되고,
 Airflow scheduler가 이를 스캔하여 DAG를 로드합니다.
+
+또한 `train_mnist_tf`는 학습 컨테이너에서 `dags/scripts/train_mnist_cnn_tf.py`를 실행해야 하므로,
+동일한 `airflow-dags` 볼륨을 학습 컨테이너에도 마운트하도록 구성되어 있습니다.
+
+이 예제는 학습 결과(모델 파일)를 아래 경로에 저장합니다(예시):
+- `/opt/airflow/dags/artifacts/mnist_cnn_training/<ts_nodash>/model.keras`
 
 ---
 
@@ -117,7 +126,7 @@ docker exec airflow-scheduler bash -lc \
 1. Airflow UI 접속: `http://localhost:8082` (기본 `admin/admin`)
 2. `mnist_cnn_training` DAG를 켠다(토글)
 3. “Trigger DAG” 버튼으로 실행
-4. Graph/Task에서 `train_mnist_tf` → `log_to_mlflow` 순으로 성공 확인
+4. Graph/Task에서 `train_mnist_tf` → `evaluate_mnist_tf` 순으로 성공 확인
 
 ---
 
@@ -161,11 +170,19 @@ PY"
 
 운영/실험 목적에 맞게 `epochs`, 샘플 수, 모델 구조를 조정하세요.
 
-### 8.2 컨테이너 네트워크
-현재 `train_mnist_tf`는 `network_mode="bridge"` 입니다.
-- 이 예제는 “학습 컨테이너가 MLflow로 직접 통신”하지 않기 때문에 문제 없습니다.
-- 만약 학습 컨테이너에서 `mlflow.tensorflow.autolog()` 같은 걸로 직접 로깅하려면,
-  학습 컨테이너가 `mlflow` 호스트명에 접근 가능하도록 네트워크를 조정해야 합니다(예: compose 네트워크 사용).
+### 8.2 train/evaluate 태스크 분리 이유
+이 DAG는 `train -> evaluate`로 분리합니다.
+- 개발/운영에서 “평가만 재실행”, “평가 정책 교체”, “모델 아티팩트 재사용”이 쉬워집니다.
+- CeleryExecutor 환경에서는 태스크가 다른 워커에서 실행될 수 있으므로, 모델 파일은 공유 경로(또는 MLflow/S3)로 저장해야 합니다.
+
+### 8.3 컨테이너 네트워크
+현재 `train_mnist_tf`는 `network_mode="lakehouse-net"` 입니다.
+- 학습/평가 스크립트가 MLflow에 직접 로깅하므로, 컨테이너가 `mlflow` 호스트명에 접근 가능해야 합니다.
+- 외부 네트워크가 다르면 `lakehouse-net` 이름을 환경에 맞게 조정하세요.
+
+### 8.4 MLflow/이미지 로그 의존성
+현재 `DockerOperator`는 실행 시점에 `mlflow`와 `matplotlib`를 `pip install`합니다(예제 편의).
+- 운영에서는 커스텀 이미지로 미리 포함시키는 편이 안정적/빠릅니다.
 
 ---
 
