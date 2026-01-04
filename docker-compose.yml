@@ -212,6 +212,11 @@ services:
       - ./trino-config:/etc/trino
     networks:
       - lakehouse-net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/v1/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
 volumes:
   warehouse:
